@@ -29,35 +29,59 @@ var COMMANDS = map[string]int32 {
 	"PARAMS" : 5,
 }
 
-func HeartBeatMonitor(hostname string, cmdPort, pingPort, timeout int64) {
+type Host struct {
+	Host        string
+	PingPort    int64
+	CmdOutPort  int64
+	CmdInPort   int64
+}
+
+func initHostsDefaults(hosts []Host) {
+	for i:=0 ; i<len(hosts) ; i++ {
+		if hosts[i].Host == "" {
+			hosts[i].Host = DEFAULT_LOCAL_HOST
+		}
+		if hosts[i].PingPort <= 0 {
+			hosts[i].PingPort = DEFAULT_PING_PORT
+		}
+		if hosts[i].CmdInPort <= 0 {
+			hosts[i].CmdInPort = DEFAULT_COMMAND_IN_PORT
+		}
+		if hosts[i].CmdOutPort <= 0 {
+			hosts[i].CmdOutPort = DEFAULT_COMMAND_OUT_PORT
+		}
+	}
+}
+
+func HeartBeatMonitor(hosts []Host, timeout int64) {
 
 	if timeout < 1 {
 		timeout = 5
 	}
 
+	initHostsDefaults(hosts)
+	
 	monitoredClients := make(map[string]PingInfo)
 	allHistory := make([]CmdHistory,0)
 
 	heartBeatSocket, _ := zmq.NewSocket(zmq.SUB)
 	defer heartBeatSocket.Close()
-	connectString := fmt.Sprintf("tcp://*:%d", /* hostname, */ pingPort)
-	fmt.Printf("Listening for hearbeats on port %s\n", connectString)
-	heartBeatSocket.Bind(connectString) // XXX
-
 	//  Subscribe to "PING " & "CMDR " messages
 	heartBeatSocket.SetSubscribe("PING ")
 	heartBeatSocket.SetSubscribe("CMDR ")
 	
+	commandOutSocket, _ := zmq.NewSocket(zmq.PUB)
+	defer commandOutSocket.Close()
+
+	for i:=0 ; i<len(hosts) ; i++ {
+		heartBeatSocket.Connect(fmt.Sprintf("tcp://%s:%d", hosts[i].Host, hosts[i].CmdOutPort)) //XXX
+		heartBeatSocket.Connect(fmt.Sprintf("tcp://%s:%d", hosts[i].Host, hosts[i].PingPort))   //XXX
+		commandOutSocket.Connect(fmt.Sprintf("tcp://%s:%d", hosts[i].Host, hosts[i].CmdInPort)) //XXX
+	}
+
 	commandInSocket, _ := zmq.NewSocket(zmq.PAIR)
 	defer commandInSocket.Close()
 	commandInSocket.Connect("inproc://commands")
-
-	commandOutSocket, _ := zmq.NewSocket(zmq.PUB)
-	defer commandOutSocket.Close()
-	connectString = fmt.Sprintf("tcp://*:%d", /* hostname, */ cmdPort)
-	fmt.Printf("Broadcasting commands on port %s\n", connectString)
-	commandOutSocket.Bind(connectString)
-
 
 	//  Initialize poll set
 	poller := zmq.NewPoller()

@@ -11,11 +11,6 @@ const ( EXIT   = "01"
         CNTMSG = "04"
         PARAMS = "05" )
 
-const (
-	DEFAULT_CONTROLLER_HOST   = "localhost"
-	DEFAULT_COMMAND_PORT      = 50000
-	DEFAULT_PING_PORT         = 40000
-	DEFAULT_PING_TIMEOUT      = 5 )
 
 
 type MonitoredSocket struct {
@@ -25,12 +20,14 @@ type MonitoredSocket struct {
 
 type Reactor struct {
 	ServerID          string
+	LocalHost         string
 
 	CommandInSocket   *zmq.Socket
+	LocalCmdInPort     int32
 
 	CommandOutSocket  *zmq.Socket
-	ControllerCmdPort  int32
-	ControllerHost     string
+	LocalCmdOutPort    int32
+	
 
 	PingPort          int32
 	PingTimeout       int32
@@ -55,32 +52,32 @@ func (reactor *Reactor) initDefault() *Reactor {
 		}
 	}
 
+	if reactor.LocalHost == "" { 
+		reactor.LocalHost = DEFAULT_LOCAL_HOST
+	}
+
 	if reactor.CommandInSocket == nil {
-		if reactor.ControllerHost == "" {
-			reactor.ControllerHost = DEFAULT_CONTROLLER_HOST
-		}
-		if reactor.ControllerCmdPort <= 0 {
-			reactor.ControllerCmdPort = DEFAULT_COMMAND_PORT
+		if reactor.LocalCmdInPort <= 0 {
+			reactor.LocalCmdInPort = DEFAULT_COMMAND_IN_PORT
 		}
 		reactor.CommandInSocket, _ = zmq.NewSocket(zmq.SUB)
-		connectString := fmt.Sprintf("tcp://%s:%d", reactor.ControllerHost, reactor.ControllerCmdPort)
-		fmt.Printf("Subscribing for commands from %s on 'CMD %s ' and 'CMD * ' topics\n", connectString, reactor.ServerID)
-		reactor.CommandInSocket.Connect(connectString)
+		connectString := fmt.Sprintf("tcp://*:%d", /* reactor.LocalHost,*/  reactor.LocalCmdInPort)
+		fmt.Printf("Listening for commands on %s \n", connectString)
+		reactor.CommandInSocket.Bind(connectString) //XXX
 		reactor.CommandInSocket.SetSubscribe("CMD " + reactor.ServerID + " ")
 		reactor.CommandInSocket.SetSubscribe("CMD * ")
 		reactor.privateCommandInSocket = true
 	}
 
 	if reactor.CommandOutSocket == nil {
-		if reactor.ControllerHost == "" {
-			reactor.ControllerHost = DEFAULT_CONTROLLER_HOST
-		}
-		if reactor.PingPort <= 0 {
-			reactor.PingPort = DEFAULT_PING_PORT
+		if reactor.LocalCmdOutPort <= 0 {
+			reactor.LocalCmdOutPort = DEFAULT_COMMAND_OUT_PORT
 		}
 		reactor.CommandOutSocket, _ = zmq.NewSocket(zmq.PUB)
 		reactor.CommandOutSocket.SetConflate(true)
-		reactor.CommandOutSocket.Connect(fmt.Sprintf("tcp://%s:%d", reactor.ControllerHost, reactor.PingPort)) //XXX
+		connectString := fmt.Sprintf("tcp://*:%d", /* reactor.LocalHost, */ reactor.LocalCmdOutPort) 
+		fmt.Printf("Publishing REPLY CMD  messages on port %d\n", reactor.LocalCmdOutPort)
+		reactor.CommandOutSocket.Bind(connectString) // XXX
 		reactor.privateCommandOutSocket = true
 	}
 
@@ -110,7 +107,7 @@ func (reactor *Reactor) Run() {
 		return
 	}
 
-	go Ping( reactor.ControllerHost, reactor.PingPort, reactor.ServerID, reactor.PingTimeout )
+	go Ping( reactor.LocalHost, reactor.PingPort, reactor.ServerID, reactor.PingTimeout )
 
 	// Initialize poll set
 	poller := zmq.NewPoller()

@@ -1,0 +1,8 @@
+package controller
+
+const (
+	DEFAULT_LOCAL_HOST        = "localhost"
+	DEFAULT_COMMAND_IN_PORT   = 50000
+	DEFAULT_COMMAND_OUT_PORT  = 55000
+	DEFAULT_PING_PORT         = 40000
+	DEFAULT_PING_TIMEOUT      = 5 )

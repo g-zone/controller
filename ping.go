@@ -7,7 +7,7 @@ import (
 )
 
 
-func Ping(controllerHost string, controllerPingPort int32, serverId string, interval int32)  {
+func Ping(pingHost string, pingPort int32, serverId string, interval int32)  {
 
 	if interval < 1 {
 		interval = 5
@@ -18,8 +18,9 @@ func Ping(controllerHost string, controllerPingPort int32, serverId string, inte
 	publisher.SetImmediate(true)
 	publisher.SetConflate(true)
 	defer publisher.Close()
-	fmt.Printf("Pinging monitor app on tcp://%s:%d\n", controllerHost, controllerPingPort)
-	publisher.Connect(fmt.Sprintf("tcp://%s:%d", controllerHost, controllerPingPort))
+	connectString := fmt.Sprintf("tcp://*:%d", /* pingHost, */ pingPort) 
+	fmt.Printf("Publishing PING messages on port %d\n", pingPort)
+	publisher.Bind(connectString) // XXX
 
 	msg := fmt.Sprintf("PING %s", serverId)
 

@@ -1,45 +1,40 @@
 package controller
 
 import (
-	zmq "github.com/pebbe/zmq4"
 	"fmt"
+	zmq "github.com/pebbe/zmq4"
 )
 
-const ( EXIT   = "01"
-	PAUSE  = "02"
-        RESUME = "03"
-        CNTMSG = "04"
-        PARAMS = "05" )
-
 const (
-	DEFAULT_CONTROLLER_HOST   = "localhost"
-	DEFAULT_COMMAND_PORT      = 50000
-	DEFAULT_PING_PORT         = 40000
-	DEFAULT_PING_TIMEOUT      = 5 )
+	EXIT   = "01"
+	PAUSE  = "02"
+	RESUME = "03"
+	CNTMSG = "04"
+	PARAMS = "05"
+)
 
-
-type MonitoredSocket struct {
-	DataInSocket  *zmq.Socket
-	DataCallBack  func (data []byte)
+type MonitoredSocket interface {
+	GetDataInSocket() *zmq.Socket
+	HandleData(data []byte)
+	HandleCommand(cmd, params []byte)
 }
 
 type Reactor struct {
-	ServerID          string
+	ServerID string
 
-	CommandInSocket   *zmq.Socket
+	CommandInSocket *zmq.Socket
 
 	CommandOutSocket  *zmq.Socket
-	ControllerCmdPort  int32
-	ControllerHost     string
+	ControllerCmdPort int32
+	ControllerHost    string
 
-	PingPort          int32
-	PingTimeout       int32
+	PingPort    int32
+	PingTimeout int32
 
-	MonitoredSockets  []MonitoredSocket
-
-	CommandCallBack   func(cmd, params []byte)
+	MonitoredSockets []MonitoredSocket
 
 	privateCommandInSocket, privateCommandOutSocket bool
+	TotalMsgCounter, TotalInputDataSize             uint64
 }
 
 func (reactor *Reactor) initDefault() *Reactor {
@@ -48,8 +43,8 @@ func (reactor *Reactor) initDefault() *Reactor {
 		return nil
 	}
 
-	for i:=0 ; i<len(reactor.MonitoredSockets) ; i++ {
-		if reactor.MonitoredSockets[i].DataInSocket == nil {
+	for i := 0; i < len(reactor.MonitoredSockets); i++ {
+		if reactor.MonitoredSockets[i].GetDataInSocket() == nil {
 			fmt.Printf("ERROR: uninitialized DataInSocket member #%d\n", i)
 			return nil
 		}
@@ -84,14 +79,14 @@ func (reactor *Reactor) initDefault() *Reactor {
 		reactor.privateCommandOutSocket = true
 	}
 
-	if reactor.PingPort <= 0 { 
+	if reactor.PingPort <= 0 {
 		reactor.PingPort = DEFAULT_PING_PORT
 	}
 
 	if reactor.PingTimeout <= 0 {
 		reactor.PingTimeout = DEFAULT_PING_TIMEOUT
 	}
-		
+
 	return reactor
 }
 
@@ -110,19 +105,17 @@ func (reactor *Reactor) Run() {
 		return
 	}
 
-	go Ping( reactor.ControllerHost, reactor.PingPort, reactor.ServerID, reactor.PingTimeout )
+	go Ping(reactor.ControllerHost, reactor.PingPort, reactor.ServerID, reactor.PingTimeout)
 
 	// Initialize poll set
 	poller := zmq.NewPoller()
 	poller.Add(reactor.CommandInSocket, zmq.POLLIN)
-	for i:=0 ; i<len(reactor.MonitoredSockets) ; i++ {
-		poller.Add(reactor.MonitoredSockets[i].DataInSocket, zmq.POLLIN)
+	for i := 0; i < len(reactor.MonitoredSockets); i++ {
+		poller.Add(reactor.MonitoredSockets[i].GetDataInSocket(), zmq.POLLIN)
 	}
 
 	bPaused := false
 	bExitMainLoop := false
-	msgCounter := uint64(0)
-	totalInputDataSize := uint64(0)
 	cmdPrefixLength := len(reactor.ServerID) + 5
 	msgOut := ""
 	padding := int(0)
@@ -143,7 +136,7 @@ func (reactor *Reactor) Run() {
 
 			cmd, _ := reactor.CommandInSocket.RecvBytes(0)
 
-			if cmd [4] == '*' {
+			if cmd[4] == '*' {
 				padding = 6
 			} else {
 				padding = cmdPrefixLength
@@ -152,23 +145,23 @@ func (reactor *Reactor) Run() {
 			switch string(cmd[padding : padding+2]) {
 			case EXIT:
 				bExitMainLoop = true
-				msgOut = fmt.Sprintf("CMDR %s EXIT" , reactor.ServerID)
+				msgOut = fmt.Sprintf("CMDR %s EXIT", reactor.ServerID)
 			case PAUSE:
 				bPaused = true
-				msgOut = fmt.Sprintf("CMDR %s PAUSED" , reactor.ServerID)
+				msgOut = fmt.Sprintf("CMDR %s PAUSED", reactor.ServerID)
 			case RESUME:
 				bPaused = false
-				msgOut = fmt.Sprintf("CMDR %s RESUMED" , reactor.ServerID)
+				msgOut = fmt.Sprintf("CMDR %s RESUMED", reactor.ServerID)
 			case CNTMSG:
-				msgOut = fmt.Sprintf("CMDR %s PROCESSED %d msgs totaling %d bytes" , reactor.ServerID, msgCounter, totalInputDataSize)
+				msgOut = fmt.Sprintf("CMDR %s PROCESSED %d msgs totaling %d bytes", reactor.ServerID, reactor.TotalMsgCounter, reactor.TotalInputDataSize)
 			case PARAMS:
-				msgOut = fmt.Sprintf("CMDR %s PARAMS",  reactor.ServerID) 
+				msgOut = fmt.Sprintf("CMDR %s PARAMS", reactor.ServerID)
 			}
-			if reactor.CommandCallBack != nil {
-				reactor.CommandCallBack( cmd[padding : padding+2], cmd[padding+2:] )
+			for i := 0; i < len(reactor.MonitoredSockets); i++ {
+				reactor.MonitoredSockets[i].HandleCommand(cmd[padding:padding+2], cmd[padding+2:])
 			}
 			reactor.CommandOutSocket.Send(msgOut, 0)
-		} 
+		}
 
 		if bExitMainLoop == true {
 			break
@@ -178,15 +171,13 @@ func (reactor *Reactor) Run() {
 		// Second, check if data is available on any of the data in monitored sockets
 		//
 
-		for i:=0 ; i<len(reactor.MonitoredSockets) ; i++ {
+		for i := 0; i < len(reactor.MonitoredSockets); i++ {
 			if sockets[1+i].Events&zmq.POLLIN != 0 { //New data package is available on DataInSocket
-				data, _ := reactor.MonitoredSockets[i].DataInSocket.RecvBytes(0)
+				data, _ := reactor.MonitoredSockets[i].GetDataInSocket().RecvBytes(0)
 				if bPaused == false {
-					if reactor.MonitoredSockets[i].DataCallBack != nil {
-						reactor.MonitoredSockets[i].DataCallBack( data )
-					}
-					totalInputDataSize += uint64(len(data))
-					msgCounter++
+					reactor.MonitoredSockets[i].HandleData(data)
+					reactor.TotalInputDataSize += uint64(len(data))
+					reactor.TotalMsgCounter++
 				}
 			}
 		}

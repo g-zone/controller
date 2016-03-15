@@ -13,9 +13,10 @@ const ( EXIT   = "01"
 
 
 
-type MonitoredSocket struct {
-	DataInSocket  *zmq.Socket
-	DataCallBack  func (data []byte)
+type MonitoredSocket interface {
+	GetDataInSocket()  *zmq.Socket
+	HandleData(data []byte)
+	HandleCommand(cmd, params []byte)
 }
 
 type Reactor struct {
@@ -34,9 +35,8 @@ type Reactor struct {
 
 	MonitoredSockets  []MonitoredSocket
 
-	CommandCallBack   func(cmd, params []byte)
-
 	privateCommandInSocket, privateCommandOutSocket bool
+	TotalMsgCounter, TotalInputDataSize  uint64
 }
 
 func (reactor *Reactor) initDefault() *Reactor {
@@ -46,7 +46,7 @@ func (reactor *Reactor) initDefault() *Reactor {
 	}
 
 	for i:=0 ; i<len(reactor.MonitoredSockets) ; i++ {
-		if reactor.MonitoredSockets[i].DataInSocket == nil {
+		if reactor.MonitoredSockets[i].GetDataInSocket() == nil {
 			fmt.Printf("ERROR: uninitialized DataInSocket member #%d\n", i)
 			return nil
 		}
@@ -113,13 +113,11 @@ func (reactor *Reactor) Run() {
 	poller := zmq.NewPoller()
 	poller.Add(reactor.CommandInSocket, zmq.POLLIN)
 	for i:=0 ; i<len(reactor.MonitoredSockets) ; i++ {
-		poller.Add(reactor.MonitoredSockets[i].DataInSocket, zmq.POLLIN)
+		poller.Add(reactor.MonitoredSockets[i].GetDataInSocket(), zmq.POLLIN)
 	}
 
 	bPaused := false
 	bExitMainLoop := false
-	msgCounter := uint64(0)
-	totalInputDataSize := uint64(0)
 	cmdPrefixLength := len(reactor.ServerID) + 5
 	msgOut := ""
 	padding := int(0)
@@ -157,12 +155,13 @@ func (reactor *Reactor) Run() {
 				bPaused = false
 				msgOut = fmt.Sprintf("CMDR %s RESUMED" , reactor.ServerID)
 			case CNTMSG:
-				msgOut = fmt.Sprintf("CMDR %s PROCESSED %d msgs totaling %d bytes" , reactor.ServerID, msgCounter, totalInputDataSize)
+				msgOut = fmt.Sprintf("CMDR %s PROCESSED %d msgs totaling %d bytes" , reactor.ServerID, reactor.TotalMsgCounter, reactor.TotalInputDataSize)
 			case PARAMS:
 				msgOut = fmt.Sprintf("CMDR %s PARAMS",  reactor.ServerID) 
 			}
-			if reactor.CommandCallBack != nil {
-				reactor.CommandCallBack( cmd[padding : padding+2], cmd[padding+2:] )
+
+			for i:=0 ; i<len(reactor.MonitoredSockets) ; i++ {
+				reactor.MonitoredSockets[i].HandleCommand(cmd[padding : padding+2], cmd[padding+2:])
 			}
 			reactor.CommandOutSocket.Send(msgOut, 0)
 		} 
@@ -177,13 +176,11 @@ func (reactor *Reactor) Run() {
 
 		for i:=0 ; i<len(reactor.MonitoredSockets) ; i++ {
 			if sockets[1+i].Events&zmq.POLLIN != 0 { //New data package is available on DataInSocket
-				data, _ := reactor.MonitoredSockets[i].DataInSocket.RecvBytes(0)
+				data, _ := reactor.MonitoredSockets[i].GetDataInSocket().RecvBytes(0)
 				if bPaused == false {
-					if reactor.MonitoredSockets[i].DataCallBack != nil {
-						reactor.MonitoredSockets[i].DataCallBack( data )
-					}
-					totalInputDataSize += uint64(len(data))
-					msgCounter++
+					reactor.MonitoredSockets[i].HandleData( data )
+					reactor.TotalInputDataSize += uint64(len(data))
+					reactor.TotalMsgCounter++
 				}
 			}
 		}

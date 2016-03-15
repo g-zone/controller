@@ -14,3 +14,5 @@ Default values are assumed for any &lt;key&gt; that is not entered on the comman
 <tt>node &lt;server name&gt;</tt>
 
 All other parameters assume default values (see "constants.go" in the parent directory)
+
+Compile <tt>node</tt> like this: <tt>go build node.go average.go</tt>

@@ -176,7 +176,7 @@ func HeartBeatMonitor(hosts []Host, timeout int64) {
 					continue
 				}
 			}
-			rawCmd := fmt.Sprintf("CMD %s %02d %s", serverId, cmdId, strings.Join(cmds[2:], " "))
+			rawCmd := fmt.Sprintf("\x00CMD %s %02d %s", serverId, cmdId, strings.Join(cmds[2:], " "))
 			commandOutSocket.Send(rawCmd, 0)
 		}
 	}

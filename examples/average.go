@@ -18,6 +18,7 @@ type ComputeAverage struct {
         Socket *zmq.Socket  //This is usually provided at construction time
 
 	//Private members
+	CmdOutSocket *zmq.Socket
 	sum   int64
 	count int64
 }
@@ -27,9 +28,15 @@ func (this *ComputeAverage) GetDataInSocket() *zmq.Socket {
 }
 
 func (this *ComputeAverage) HandleData(data []byte) {
-	if n, nBytes := binary.Varint(data) ; nBytes>0 {
+	if n, nBytes := binary.Varint(data[1:9]) ; nBytes>0 {
 		this.sum += n
 		this.count++
+		/*
+		if this.count == 1e6 {
+			fmt.Println("Sending exit msg")
+			this.CmdOutSocket.Send("\x00CMD * 01 ",0)
+		}
+		*/
 	}
 }
 

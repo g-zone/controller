@@ -153,6 +153,10 @@ func (reactor *Reactor) Run() {
 		//Read in messages/commands
 		msg, _ := socket.RecvBytes(0)
 
+		if len(msg) == 0 {
+			continue
+		}
+
 		if msg[0] == 0 {
 			//
 			// COMMANDS

@@ -3,6 +3,7 @@ package main
 import (
 	zmq "github.com/pebbe/zmq4"
 	ctrl "github.com/g-zone/controller"
+	ob "github.com/g-zone/tengine"
 	"time"
 	"fmt"
 	"os"
@@ -17,31 +18,47 @@ func main() {
 
 
 	//Setup data IN socket
-	dataInSocket, _ := zmq.NewSocket(zmq.PULL)
+	dataInSocket, _ := zmq.NewSocket(zmq.SUB)
 	defer dataInSocket.Close()
+	dataInSocket.SetSubscribe("")
 	dataInSocket.Connect("tcp://localhost:23256")
 	
-	//Setup a functor that we'll pass it into the reactor
-	cmdSocket, _ := zmq.NewSocket(zmq.PUB)
-	cmdSocket.Connect("tcp://localhost:50000")
-	average := &ComputeAverage{ Socket:dataInSocket, CmdOutSocket:cmdSocket }
+	algorithm := &SampleAlgo{ 
+		OrderBook    : ob.NewOrderBook(9364),
+		HiPx         : -1,
+		LowPx        : -1,
+	}
 
-	start := time.Now()
-	
 	//Setup the reactor
 	reactor := &ctrl.Reactor{ 
-		ServerID : serverID , 
-		MonitoredSockets : average , //optional
+		ServerID     : serverID,
+		DataInSocket : dataInSocket,
+		CallBackApp  : algorithm, 
 	}
 	defer reactor.CleanUp()
+
+	// Setup a command socket to kick/stop data feeder 
+	// THIS IS NOT REQUIRED IN PROD VERSION OF THIS APP
+	feederCmdSocket, _ := zmq.NewSocket(zmq.PUSH)
+	defer feederCmdSocket.Close()
+	feederCmdSocket.Connect("tcp://localhost:23257")
+	feederCmdSocket.SendBytes([]byte(""), 0) //Signal the feeder to start 
+
+	start := time.Now()
 
 	//Start the reactor
 	reactor.Run() 
 
 	ellapsed := time.Now().Sub(start)
-	fmt.Printf("Ellapsed %.1f seconds. Processed %.2f K messages.\nSpeed %.2fK msg/msec ( %.2f usec/msg )\n", 
+
+	//THIS IS NOT REQUIRED IN PROD VERSION OF THIS APP
+	feederCmdSocket.SendBytes([]byte(""), 0) //Signal the feeder to pause
+
+	fmt.Printf("Elapsed %.1f seconds. Processed %.2f K messages.\n" +
+		   "Size of processed data %.2f KB\n" +
+		   "Speed: %.2fK msg/msec ( %.2f usec/msg )\n", 
 		   ellapsed.Seconds(), float64(reactor.TotalMsgCounter)/1e3, 
+		   float64(reactor.TotalInputDataSize)/1024,
 		   float64(reactor.TotalMsgCounter)/(ellapsed.Seconds()*1e3), (ellapsed.Seconds()*1e6)/float64(reactor.TotalMsgCounter) )
-	fmt.Printf("Average = %.2f\n", average.Value())
 }
 

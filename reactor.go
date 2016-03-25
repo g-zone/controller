@@ -14,8 +14,7 @@ const (
 
 
 
-type MonitoredSocket interface {
-	GetDataInSocket()  *zmq.Socket
+type AppCallBack interface {
 	HandleData(data []byte)
 	HandleCommand(cmd, params []byte)
 }
@@ -23,6 +22,8 @@ type MonitoredSocket interface {
 type Reactor struct {
 	ServerID          string
 	LocalHost         string
+
+	DataInSocket      *zmq.Socket
 
 	CommandInSocket   *zmq.Socket
 	LocalCmdInPort     int32
@@ -34,7 +35,7 @@ type Reactor struct {
 	PingPort          int32
 	PingTimeout       int32
 
-	MonitoredSockets  MonitoredSocket
+	CallBackApp       AppCallBack
 
 	privateCommandInSocket, privateCommandOutSocket bool
 	TotalMsgCounter, TotalInputDataSize  uint64
@@ -46,8 +47,8 @@ func (reactor *Reactor) initDefault() *Reactor {
 		return nil
 	}
 
-	if reactor.MonitoredSockets != nil {
-		if (reactor.MonitoredSockets).GetDataInSocket() == nil {
+	if reactor.CallBackApp != nil {
+		if reactor.DataInSocket == nil {
 			fmt.Println("ERROR: uninitialized DataInSocket member")
 			return nil
 		}
@@ -125,14 +126,12 @@ func (reactor *Reactor) Run() {
 
 	var dataSocketType zmq.Type
 
-	socket := reactor.MonitoredSockets.GetDataInSocket()
-	
-	dataSocketType, _ = socket.GetType()
+	dataSocketType, _ = reactor.DataInSocket.GetType()
 	switch dataSocketType {
 	case zmq.SUB  : 
 		dataSocketType = zmq.PUB
 		fmt.Println("Using PUB socket type for sending internal commands")
-		socket.SetSubscribe("\x00CMD ")
+		reactor.DataInSocket.SetSubscribe("\x00CMD ")
 	case zmq.PULL : 
 		fmt.Println("Using PUSH socket type for sending internal commands")
 		dataSocketType = zmq.PUSH
@@ -147,11 +146,11 @@ func (reactor *Reactor) Run() {
 	cmdPrefixLength := len(reactor.ServerID) + 6
 	msgOut := ""
 	padding := int(0)
-	socket.Connect("inproc://commands")
+	reactor.DataInSocket.Connect("inproc://commands")
 
 	for {
 		//Read in messages/commands
-		msg, _ := socket.RecvBytes(0)
+		msg, _ := reactor.DataInSocket.RecvBytes(0)
 
 		if len(msg) == 0 {
 			continue
@@ -181,14 +180,14 @@ func (reactor *Reactor) Run() {
 			case PARAMS:
 				msgOut = fmt.Sprintf("CMDR %s PARAMS",  reactor.ServerID) 
 			}
-			(reactor.MonitoredSockets).HandleCommand(msg[padding : padding+2], msg[padding+2:])
+			(reactor.CallBackApp).HandleCommand(msg[padding : padding+2], msg[padding+2:])
 			reactor.CommandOutSocket.Send(msgOut, 0)
 		} else {
 			//
 			// REGULAR MESSAGES
 			//
 			if bPaused == false {
-				(reactor.MonitoredSockets).HandleData( msg )
+				(reactor.CallBackApp).HandleData( msg )
 				reactor.TotalInputDataSize += uint64(len(msg))
 				reactor.TotalMsgCounter++
 			}

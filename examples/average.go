@@ -30,14 +30,15 @@ func (this *SampleAlgo) HandleCommand(cmd, params []byte) {
 func (this *SampleAlgo) HandleData(data []byte) {
 
 	this.count++
-	// Exit if you have processed enough messages
-	if this.count == 1e4 {  
+	// Exit after we have processed enough messages
+	if this.count == 1e6 {  
 		this.OrderBook.Dump()
 		fmt.Println("Sending exit msg")
 		SingalReactorToExit()
 	}
 
-	// return
+	//return
+
 
 	//build order book, using level updates of QB/QS
 	//keep running calc of this.vwap when either Turnover happens or Market order comes in
@@ -83,15 +84,15 @@ func (this *SampleAlgo) HandleData(data []byte) {
 			oSide := strings.Split(t[1], ":")[1]
 			oPx, _ := strconv.Atoi(strings.Split(t[2], ":")[1])
 			oQty, _ := strconv.Atoi(strings.Split(t[3], ":")[1])
-
-			if oSide == "SELL" {
+			oMob, _ := strconv.Atoi(strings.Split(t[0],":")[1])
+			if oSide == "S" {
 			
-				this.OrderBook.UpdateLevels(ob.SELL, int32(oPx), int32(oQty))
+				this.OrderBook.UpdateLevels(ob.SELL, int32(oPx), int32(oQty), int32(oMob))
 			} else {
-				this.OrderBook.UpdateLevels(ob.BUY, int32(oPx), int32(oQty))
+				this.OrderBook.UpdateLevels(ob.BUY, int32(oPx), int32(oQty), int32(oMob))
 			}
 
-			//build the this.OrderBook with level updates
+			//build the orderbook with level updates
 			//		MinAsk  int32
 			//MaxAsk	int32  //depth
 			//MaxBid  int32
@@ -102,7 +103,6 @@ func (this *SampleAlgo) HandleData(data []byte) {
 		//if this.vwap > ob.lowoffer put a buy order in
 		//if this.vwap < ob.bestbid  put a sell order in
 	}
-
 }
 
 
